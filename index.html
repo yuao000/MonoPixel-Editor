@@ -7,7 +7,6 @@
     <meta property="og:title" content="MonoPixel Art">
     <meta property="og:description" content="URLだけで共有できる96x96ドット絵">
     <meta property="og:type" content="website">
-    <meta id="ogImage" property="og:image" content="">
     <meta name="twitter:card" content="summary_large_image">
     
     <style>
@@ -234,12 +233,6 @@
         document.getElementById('viewLink').innerText = viewURL;
         document.getElementById('editLink').innerText = editURL;
         window.history.replaceState(null, '', editURL);
-
-        // --- OGP設定の更新 ---
-        // WordPressのmshots APIを使用して、現在の「閲覧モードURL」のスクショを撮影させる
-        const screenshotAPI = "https://s.wordpress.com/mshots/v1/";
-        const ogImageUrl = screenshotAPI + encodeURIComponent(viewURL) + "?w=600";
-        document.getElementById('ogImage').setAttribute('content', ogImageUrl);
     }
 
     function drawLine(x1, y1, x2, y2) {
@@ -316,3 +309,4 @@
 </script>
 </body>
 </html>
+
