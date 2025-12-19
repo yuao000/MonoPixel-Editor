@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MonoPixel Max</title>
+    <style>
+        :root {
+            --bg: #0b0f1a;
+            --card: #161e2d;
+            --accent: #0ea5e9;
+            --text: #f8fafc;
+            --dim: #94a3b8;
+        }
+        body {
+            font-family: system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        .container { width: 100%; max-width: 500px; }
+        
+        /* モードによる表示制御 */
+        .edit-only { display: block; }
+        body.view-mode .edit-only { display: none; }
+        .view-only { display: none; }
+        body.view-mode .view-only { display: block; }
+
+        h1 { font-size: 1.25rem; margin-bottom: 1rem; color: var(--accent); text-align: center; }
+
+        .editor-card {
+            background: var(--card);
+            padding: 15px;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+
+        /* 閲覧モード時はカードの装飾を消す */
+        body.view-mode .editor-card {
+            background: transparent;
+            box-shadow: none;
+            padding: 0;
+        }
+
+        .canvas-container {
+            width: 100%;
+            aspect-ratio: 1;
+            background: #fff;
+            border-radius: 4px;
+            overflow: hidden;
+            touch-action: none;
+        }
+        canvas {
+            width: 100%;
+            height: 100%;
+            image-rendering: pixelated;
+            display: block;
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-top: 15px;
+        }
+        button {
+            background: #2d3748;
+            border: none;
+            color: #fff;
+            padding: 10px 5px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        button:hover { background: #4a5568; }
+        
+        .share-group {
+            margin-top: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .copy-row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .copy-row label {
+            font-size: 0.7rem;
+            width: 70px;
+            color: var(--dim);
+        }
+        .copy-btn {
+            flex: 1;
+            background: #1e293b;
+            border: 1px solid #334155;
+            color: var(--accent);
+            text-align: left;
+            padding: 8px 12px;
+            font-family: monospace;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .copy-btn:hover { background: #334155; }
+
+        /* 閲覧モードの「編集する」ボタン */
+        .remix-btn {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background: var(--accent);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 50px;
+            text-decoration: none;
+            font-weight: bold;
+            box-shadow: 0 4px 15px rgba(14, 165, 233, 0.4);
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1 class="edit-only">MonoPixel <span style="font-weight: 300;">Editor</span></h1>
+
+    <div class="editor-card">
+        <div class="canvas-container">
+            <canvas id="pCanvas" width="96" height="96"></canvas>
+        </div>
+
+        <div class="controls edit-only">
+            <button onclick="fill(0)">Clear</button>
+            <button onclick="invert()">Invert</button>
+            <button onclick="noise()">Noise</button>
+            <button onclick="download()">PNG Save</button>
+        </div>
+
+        <div class="share-group edit-only">
+            <div class="copy-row">
+                <label>閲覧URL</label>
+                <button class="copy-btn" id="viewLink" onclick="copy('view')">---</button>
+            </div>
+            <div class="copy-row">
+                <label>編集URL</label>
+                <button class="copy-btn" id="editLink" onclick="copy('edit')">---</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<a href="#" id="remixBtn" class="remix-btn view-only">編集する</a>
+
+<script>
+    const S = 96;
+    const canvas = document.getElementById('pCanvas');
+    const ctx = canvas.getContext('2d', { alpha: false });
+    
+    let pixels = new Uint8Array(S * S);
+    let isDrawing = false;
+    let color = 1;
+    let lastX = -1, lastY = -1;
+    let isEditMode = true;
+
+    // --- モード判定 ---
+    function initMode() {
+        const params = new URLSearchParams(window.location.search);
+        isEditMode = params.get('m') !== 'view';
+        if (!isEditMode) {
+            document.body.classList.add('view-mode');
+            document.getElementById('remixBtn').href = window.location.href.replace('m=view', 'm=edit');
+        }
+        
+        const data = params.get('d');
+        if (data) decode(data);
+    }
+
+    // --- Core Logic ---
+    function render() {
+        const imgData = ctx.createImageData(S, S);
+        for (let i = 0; i < pixels.length; i++) {
+            const v = pixels[i] ? 0 : 255;
+            const idx = i * 4;
+            imgData.data[idx] = v; imgData.data[idx+1] = v; imgData.data[idx+2] = v; imgData.data[idx+3] = 255;
+        }
+        ctx.putImageData(imgData, 0, 0);
+        if (isEditMode) updateLinks();
+    }
+
+    function encode() {
+        const bytes = new Uint8Array(pixels.length / 8);
+        for (let i = 0; i < pixels.length; i++) {
+            if (pixels[i]) bytes[i >> 3] |= (1 << (7 - (i % 8)));
+        }
+        return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+
+    function decode(str) {
+        try {
+            const bin = atob(str.replace(/-/g, '+').replace(/_/g, '/'));
+            for (let i = 0; i < bin.length; i++) {
+                const b = bin.charCodeAt(i);
+                for (let j = 0; j < 8; j++) {
+                    const idx = i * 8 + j;
+                    if (idx < pixels.length) pixels[idx] = (b & (1 << (7 - j))) ? 1 : 0;
+                }
+            }
+        } catch (e) {}
+    }
+
+    function updateLinks() {
+        const d = encode();
+        const base = window.location.origin + window.location.pathname;
+        const viewURL = `${base}?m=view&d=${d}`;
+        const editURL = `${base}?m=edit&d=${d}`;
+        
+        document.getElementById('viewLink').innerText = viewURL;
+        document.getElementById('editLink').innerText = editURL;
+        window.history.replaceState(null, '', editURL);
+    }
+
+    // --- Interaction ---
+    function drawLine(x1, y1, x2, y2) {
+        const dx = Math.abs(x2 - x1), dy = Math.abs(y2 - y1);
+        const sx = x1 < x2 ? 1 : -1, sy = y1 < y2 ? 1 : -1;
+        let err = dx - dy;
+        while (true) {
+            if (x1 >= 0 && x1 < S && y1 >= 0 && y1 < S) pixels[y1 * S + x1] = color;
+            if (x1 === x2 && y1 === y2) break;
+            const e2 = 2 * err;
+            if (e2 > -dy) { err -= dy; x1 += sx; }
+            if (e2 < dx) { err += dx; y1 += sy; }
+        }
+    }
+
+    function setupEvents() {
+        if (!isEditMode) return; // 閲覧モードならイベント登録しない
+
+        const getXY = (e) => {
+            const r = canvas.getBoundingClientRect();
+            const cx = e.touches ? e.touches[0].clientX : e.clientX;
+            const cy = e.touches ? e.touches[0].clientY : e.clientY;
+            return {
+                x: Math.floor((cx - r.left) * (S / r.width)),
+                y: Math.floor((cy - r.top) * (S / r.height))
+            };
+        };
+        const start = (e) => {
+            e.preventDefault();
+            const {x, y} = getXY(e);
+            if (x>=0 && x<S && y>=0 && y<S) {
+                isDrawing = true; color = pixels[y*S+x] ? 0 : 1;
+                lastX = x; lastY = y; pixels[y*S+x] = color; render();
+            }
+        };
+        const move = (e) => {
+            if (!isDrawing) return;
+            const {x, y} = getXY(e);
+            drawLine(lastX, lastY, x, y);
+            lastX = x; lastY = y; render();
+        };
+        canvas.addEventListener('mousedown', start);
+        window.addEventListener('mousemove', move);
+        window.addEventListener('mouseup', () => isDrawing = false);
+        canvas.addEventListener('touchstart', start, {passive: false});
+        canvas.addEventListener('touchmove', move, {passive: false});
+        canvas.addEventListener('touchend', () => isDrawing = false);
+    }
+
+    // --- Tools ---
+    function fill(v) { pixels.fill(v); render(); }
+    function invert() { pixels = pixels.map(p => p?0:1); render(); }
+    function noise() { pixels = pixels.map(() => Math.random()>0.9?1:0); render(); }
+    function download() {
+        const link = document.createElement('a');
+        link.download = 'pixelart.png';
+        link.href = canvas.toDataURL();
+        link.click();
+    }
+    function copy(type) {
+        const text = document.getElementById(type + 'Link').innerText;
+        navigator.clipboard.writeText(text);
+        alert(type === 'view' ? '閲覧用URLをコピーしました' : '編集用URLをコピーしました');
+    }
+
+    window.onload = () => {
+        initMode();
+        render();
+        setupEvents();
+    };
+</script>
+</body>
+</html>
