@@ -4,6 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MonoPixel Max</title>
+    <meta property="og:title" content="MonoPixel Art">
+    <meta property="og:description" content="URLだけで共有できる96x96ドット絵">
+    <meta property="og:type" content="website">
+    <meta id="ogImage" property="og:image" content="">
+    <meta name="twitter:card" content="summary_large_image">
+    
     <style>
         :root {
             --bg: #0b0f1a;
@@ -23,9 +29,14 @@
             padding: 20px;
             min-height: 100vh;
         }
+        /* 閲覧モード（viewURLをAPIが撮影する時）の背景を黒にして画像を引き立たせる */
+        body.view-mode {
+            background: #000;
+            justify-content: center;
+        }
+
         .container { width: 100%; max-width: 500px; }
         
-        /* モードによる表示制御 */
         .edit-only { display: block; }
         body.view-mode .edit-only { display: none; }
         .view-only { display: none; }
@@ -38,13 +49,14 @@
             padding: 15px;
             border-radius: 12px;
             box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            transition: 0.3s;
         }
 
-        /* 閲覧モード時はカードの装飾を消す */
         body.view-mode .editor-card {
             background: transparent;
             box-shadow: none;
             padding: 0;
+            width: 90vmin; /* 撮影時に大きく写るように調整 */
         }
 
         .canvas-container {
@@ -111,7 +123,6 @@
         }
         .copy-btn:hover { background: #334155; }
 
-        /* 閲覧モードの「編集する」ボタン */
         .remix-btn {
             position: fixed;
             bottom: 30px;
@@ -169,20 +180,19 @@
     let lastX = -1, lastY = -1;
     let isEditMode = true;
 
-    // --- モード判定 ---
     function initMode() {
         const params = new URLSearchParams(window.location.search);
         isEditMode = params.get('m') !== 'view';
         if (!isEditMode) {
             document.body.classList.add('view-mode');
-            document.getElementById('remixBtn').href = window.location.href.replace('m=view', 'm=edit');
+            const editUrl = window.location.href.replace('m=view', 'm=edit');
+            document.getElementById('remixBtn').href = editUrl;
         }
         
         const data = params.get('d');
         if (data) decode(data);
     }
 
-    // --- Core Logic ---
     function render() {
         const imgData = ctx.createImageData(S, S);
         for (let i = 0; i < pixels.length; i++) {
@@ -224,9 +234,14 @@
         document.getElementById('viewLink').innerText = viewURL;
         document.getElementById('editLink').innerText = editURL;
         window.history.replaceState(null, '', editURL);
+
+        // --- OGP設定の更新 ---
+        // WordPressのmshots APIを使用して、現在の「閲覧モードURL」のスクショを撮影させる
+        const screenshotAPI = "https://s.wordpress.com/mshots/v1/";
+        const ogImageUrl = screenshotAPI + encodeURIComponent(viewURL) + "?w=600";
+        document.getElementById('ogImage').setAttribute('content', ogImageUrl);
     }
 
-    // --- Interaction ---
     function drawLine(x1, y1, x2, y2) {
         const dx = Math.abs(x2 - x1), dy = Math.abs(y2 - y1);
         const sx = x1 < x2 ? 1 : -1, sy = y1 < y2 ? 1 : -1;
@@ -241,7 +256,7 @@
     }
 
     function setupEvents() {
-        if (!isEditMode) return; // 閲覧モードならイベント登録しない
+        if (!isEditMode) return;
 
         const getXY = (e) => {
             const r = canvas.getBoundingClientRect();
@@ -253,6 +268,7 @@
             };
         };
         const start = (e) => {
+            if (e.target.tagName === 'BUTTON') return;
             e.preventDefault();
             const {x, y} = getXY(e);
             if (x>=0 && x<S && y>=0 && y<S) {
@@ -274,7 +290,6 @@
         canvas.addEventListener('touchend', () => isDrawing = false);
     }
 
-    // --- Tools ---
     function fill(v) { pixels.fill(v); render(); }
     function invert() { pixels = pixels.map(p => p?0:1); render(); }
     function noise() { pixels = pixels.map(() => Math.random()>0.9?1:0); render(); }
@@ -287,7 +302,10 @@
     function copy(type) {
         const text = document.getElementById(type + 'Link').innerText;
         navigator.clipboard.writeText(text);
-        alert(type === 'view' ? '閲覧用URLをコピーしました' : '編集用URLをコピーしました');
+        const btn = document.getElementById(type + 'Link');
+        const originalText = btn.innerText;
+        btn.innerText = "COPIED!";
+        setTimeout(() => btn.innerText = originalText, 1000);
     }
 
     window.onload = () => {
